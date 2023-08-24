@@ -8,9 +8,17 @@ using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using System.Text;
 using Google.Cloud.Vision.V1;
+using YizkorBooksDigitalizer.Types.SQLiteDAL;
 
+//Step 1
 //DownloadBook("https://digitalcollections.nypl.org/items/73b73820-541b-0133-dbe2-00505686d14e", "novoselitza");
-DigitalizeYizkorBook("novoselitza");
+
+//Step 2
+//DigitalizeYizkorBook("novoselitza");
+
+//Step 3
+var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
+GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", "novoselitza", "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
 
 #region Selenium Scraping
 void DownloadBook(string uri, string placeName = null, bool headless = false)
@@ -195,6 +203,8 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     var idOnly = matchValue.Replace("id=", string.Empty);
     int.TryParse(idOnly, out int currentImgId);
 
+    File.WriteAllText("Starting-Image-Id.txt", (currentImgId - 1).ToString());
+
     var totalPages = lastImgId - currentImgId + 1;
     var page = 0;
     do
@@ -322,6 +332,63 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
         Console.WriteLine($"{i + 1}/{images.Length}");
     }
 
-    File.WriteAllLines($"fullBook {timestamp}.txt", bookTexts, Encoding.UTF8);
+    File.WriteAllLines($"fullBook {Path.GetDirectoryName(yizkorBookImagesFolder)} {timestamp}.txt", bookTexts, Encoding.UTF8);
 }
 #endregion Google Cloud OCR
+
+#region Database Creator
+void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile)
+{
+    var bookName = Directory.GetParent(ocredImagesFolder)?.Name;
+    if (string.IsNullOrEmpty(bookName))
+    {
+        bookName = ocredImagesFolder;
+    }
+    var dbFileName = $"{bookName}.db";
+    if (File.Exists(dbFileName))
+    {
+        File.Delete(dbFileName);
+    }
+    var sqliteDAL = new DAL($"{bookName}.db");
+    var sqlScript = File.ReadAllText(dbSchemaTemplateSqlFile);
+    var affectedRows = sqliteDAL.ExecuteNonQuery(sqlScript);
+    //turn off journal creation at every non query command
+    sqliteDAL.ExecuteNonQuery($"PRAGMA schema.journal_mode=OFF;");
+
+    var bookId = 1;
+    int pageId = 0, lineId = 0, wordId = 0;
+    var pageFiles = Directory.GetFiles(ocredImagesFolder, "*.txt").Where(f => !f.Contains("errors", StringComparison.InvariantCultureIgnoreCase)).OrderBy(f => int.Parse(Path.GetFileNameWithoutExtension(f).Split(' ').Last()));
+    for (var pageIndex = 0; pageIndex < pageFiles.Count(); pageIndex++)
+    {
+        var pageFile = pageFiles.ElementAt(pageIndex);
+        var pageLines = File.ReadAllLines(pageFile, Encoding.UTF8);
+
+        var succeeded = sqliteDAL.Insert($"INSERT INTO Page (Id, BookId, Number) VALUES ({++pageId}, {bookId}, {pageIndex + 1})");
+        Console.Clear();
+        Console.WriteLine($"page {pageIndex + 1}/{pageFiles.Count()}");
+
+        for (var lineIndex = 0; lineIndex < pageLines.Length; lineIndex++)
+        {
+            var pageLine = pageLines[lineIndex];
+            var words = pageLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            succeeded = sqliteDAL.Insert($"INSERT INTO Line (Id, PageId, Number) VALUES ({++lineId}, {pageId}, {lineIndex + 1})");
+            //Console.WriteLine($"line [{lineIndex + 1}]/[{pageLines.Length}]");
+
+            for (var wordIndex = 0; wordIndex < words.Length; wordIndex++)
+            {
+                var word = words[wordIndex];
+                if (word.All(c => !char.IsLetter(c)))
+                {
+                    continue;
+                }
+
+                succeeded = sqliteDAL.Insert($"INSERT INTO Word (Id, LineId, Number, Text) VALUES ({++wordId}, {lineId}, {wordIndex + 1}, '{word?.Trim()}')");
+                //Console.WriteLine($"word [{wordIndex + 1}]/[{words.Length}]");
+            }
+        }
+    }
+
+    //sqliteDAL.Insert($"INSERT INTO Book (Id, LineId, Number, Text) VALUES ({(lineIndex * pageIndex)}, {lineIndex + 1}, {wordIndex + 1}, '{word?.Trim()}')");
+}
+#endregion Database Creator
