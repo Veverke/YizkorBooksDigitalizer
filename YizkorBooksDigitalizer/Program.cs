@@ -9,16 +9,19 @@ using Newtonsoft.Json;
 using System.Text;
 using Google.Cloud.Vision.V1;
 using YizkorBooksDigitalizer.Types.SQLiteDAL;
+using System.Diagnostics;
 
 //Step 1
-//DownloadBook("https://digitalcollections.nypl.org/items/73b73820-541b-0133-dbe2-00505686d14e", "novoselitza");
+//DownloadBook("https://digitalcollections.nypl.org/items/3b71d480-7422-0133-4ba4-00505686d14e", "yedinetz");
 
 //Step 2
 //DigitalizeYizkorBook("novoselitza");
 
 //Step 3
-var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
-GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", "novoselitza", "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
+//var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
+//GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", "novoselitza", "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
+
+AllInOne("yedinetz");
 
 #region Selenium Scraping
 void DownloadBook(string uri, string placeName = null, bool headless = false)
@@ -203,7 +206,7 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     var idOnly = matchValue.Replace("id=", string.Empty);
     int.TryParse(idOnly, out int currentImgId);
 
-    File.WriteAllText("Starting-Image-Id.txt", (currentImgId - 1).ToString());
+    File.WriteAllText($"Starting-Image-Id-{placeName}-{(currentImgId - 1)}.txt", (currentImgId - 1).ToString());
 
     var totalPages = lastImgId - currentImgId + 1;
     var page = 0;
@@ -236,7 +239,7 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
 
     //write metadata json
     File.WriteAllText($"{dir.FullName}/{placeName} metadata.json", JsonConvert.SerializeObject(new { country, language }, Newtonsoft.Json.Formatting.Indented));
-    Directory.Move(dir.FullName, $@"C:\Users\avraham.kahana\Downloads\books\{placeName}");
+    //Directory.Move(dir.FullName, $@"C:\Users\avraham.kahana\Downloads\books\{placeName}");
 }
 
 void DownloadBooks()
@@ -392,3 +395,20 @@ void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile)
     //sqliteDAL.Insert($"INSERT INTO Book (Id, LineId, Number, Text) VALUES ({(lineIndex * pageIndex)}, {lineIndex + 1}, {wordIndex + 1}, '{word?.Trim()}')");
 }
 #endregion Database Creator
+
+void AllInOne(string placeName)
+{
+    var stopwatch = new Stopwatch();
+    stopwatch.Start();
+    //Step 1
+    DownloadBook("https://digitalcollections.nypl.org/items/3b71d480-7422-0133-4ba4-00505686d14e", placeName);
+
+    //Step 2
+    DigitalizeYizkorBook(placeName);
+
+    //Step 3
+    var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
+    GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", placeName, "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
+
+    Console.WriteLine($"Total elapsed time: [{stopwatch.Elapsed}]");
+}
