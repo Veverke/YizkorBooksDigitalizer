@@ -12,11 +12,16 @@ using YizkorBooksDigitalizer.Types.SQLiteDAL;
 using System.Diagnostics;
 using Serilog;
 
-AllInOne("https://digitalcollections.nypl.org/items/f2b379d0-6150-0133-e7c9-00505686d14e", "briceva");
+AllInOne("https://digitalcollections.nypl.org/items/c1d5aed0-2328-0133-6337-58d385a7b928", "zychlin");
 
 #region Selenium Scraping
-void DownloadBook(string uri, string placeName = null, bool headless = false)
+void DownloadBook(string uri, out int startingImgId, string placeName = null, bool headless = false)
 {
+    startingImgId = -1;
+    Directory.CreateDirectory(Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", placeName));
+    var imagesFolder = Directory.CreateDirectory(Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", placeName, "Images"));
+    var imagesOCRedFolder = Directory.CreateDirectory(Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", placeName, "Images OCRed"));
+
     var chromeOptions = new ChromeOptions { BinaryLocation = Path.Combine(Environment.CurrentDirectory, "chromedriver.exe") };
     if (headless)
     {
@@ -126,6 +131,7 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
 
     var imgUrl = imgSrc;
     var webClient = new WebClient();
+    webClient.Proxy = null;
     var matchValue = regexId.Match(imgUrl)?.Value;
     var idOnly = matchValue.Replace("id=", string.Empty);
     int.TryParse(idOnly, out int currentImgId);
@@ -136,8 +142,8 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     var page = 0;
     do
     {
-        webClient.DownloadFile(imgUrl, $"{dir.FullName}/{placeName} page {++page}.jpg");
-        Thread.Sleep(TimeSpan.FromSeconds(0.15));
+        webClient.DownloadFile(imgUrl, Path.Combine(imagesFolder.FullName, $"{placeName} page {++page}.jpg"));
+        Thread.Sleep(TimeSpan.FromSeconds(0.05));
         imgUrl = regexId.Replace(imgUrl, $"id={++currentImgId}");
         Console.Clear();
         Console.WriteLine($"{nameof(DownloadBook)} - {placeName}: {page}/{totalPages}");
@@ -147,8 +153,10 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     webClient.Dispose();
 
     //write metadata json
-    File.WriteAllText($"{dir.FullName}/{placeName} metadata.json", JsonConvert.SerializeObject(new { country, language }, Newtonsoft.Json.Formatting.Indented));
+    File.WriteAllText($"{imagesFolder.FullName}/{placeName} metadata.json", JsonConvert.SerializeObject(new { country, language }, Newtonsoft.Json.Formatting.Indented));
     //Directory.Move(dir.FullName, $@"C:\Users\avraham.kahana\Downloads\books\{placeName}");
+
+    startingImgId = currentImgId - 1;
 }
 
 void DownloadBooks()
@@ -176,7 +184,7 @@ void DownloadBooks()
             var name = fields.FirstOrDefault().Trim(new char[] { '"' });
             var link = fields.LastOrDefault().Trim(new char[] { '"' });
 
-            DownloadBook(link, name);
+            DownloadBook(link, out int startingImgId, placeName: name);
         });
 
         tasks.Add(task);
@@ -195,16 +203,19 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
      * 2. Activate billing in google api
      */
 
+    var imagesFolder = Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", yizkorBookImagesFolder, "Images");
+    var imagesOCRedFolder = Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", yizkorBookImagesFolder, "Images OCRed");
+
     //var uri = "https://digitalcollections.nypl.org/items/0199e0f0-3eb4-0133-476c-00505686d14e#/?uuid=035fc5f0-3eb4-0133-8ce7-00505686d14e";
     //var image = Image.FromUri(uri);
     var errors = new List<string>();
     //var images = Directory.GetFiles(@"C:\Users\avraham.kahana\Downloads\Yizkor Book Digitalized");
-    var images = Directory.GetFiles(yizkorBookImagesFolder);
+    var images = Directory.GetFiles(imagesFolder);
     List<string> bookTexts = new List<string>();
     DirectoryInfo outputDir = null;
     var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss");
     if (!Directory.Exists("Output"))
-        outputDir = Directory.CreateDirectory($"Output {timestamp}");
+        outputDir = Directory.CreateDirectory($"Output {yizkorBookImagesFolder} {timestamp}");
 
     var client = ImageAnnotatorClient.Create();
 
@@ -230,8 +241,8 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
 
         var pageText = response?.Text ?? string.Empty;
         bookTexts.Add(string.Join(string.Empty, pageText));
-        var pageOutputPath = Path.Combine(outputDir.FullName, $"{Path.GetFileNameWithoutExtension(image)}.txt");
-        var errorsOutputPath = Path.Combine(outputDir.FullName, "errors.txt");
+        var pageOutputPath = Path.Combine(imagesOCRedFolder, $"{Path.GetFileNameWithoutExtension(image)}.txt");
+        var errorsOutputPath = Path.Combine(imagesOCRedFolder, "errors.txt");
 
 
         List<string> pageTextFinal = new List<string> { $"Page {i + 1}", pageText };
@@ -250,24 +261,27 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
         outputFilePlaceName = yizkorBookImagesFolder;
     }
 
-    File.WriteAllLines($"fullBook {Path.GetDirectoryName(yizkorBookImagesFolder)} {timestamp}.txt", bookTexts, Encoding.UTF8);
+    File.WriteAllLines($"fullBook {outputFilePlaceName} {timestamp}.txt", bookTexts, Encoding.UTF8);
 }
 #endregion Google Cloud OCR
 
 #region Database Creator
-void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile)
+void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile, int startingImgId)
 {
+    var outputFolder = Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", ocredImagesFolder);
     var bookName = Directory.GetParent(ocredImagesFolder)?.Name;
+
     if (string.IsNullOrEmpty(bookName))
     {
         bookName = ocredImagesFolder;
     }
-    var dbFileName = $"{bookName}.db";
+    var dbFileName = Path.Combine(outputFolder, $"{bookName}-{startingImgId}.db");
     if (File.Exists(dbFileName))
     {
         File.Delete(dbFileName);
     }
-    var sqliteDAL = new DAL($"{bookName}.db");
+
+    var sqliteDAL = new DAL(dbFileName);
     var sqlScript = File.ReadAllText(dbSchemaTemplateSqlFile);
     var affectedRows = sqliteDAL.ExecuteNonQuery(sqlScript);
     //turn off journal creation at every non query command
@@ -324,12 +338,12 @@ void AllInOne(string nyplBookLink, string placeName)
     .WriteTo.File(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}", path: "Logs/yizkor-book-digitalizer.log", rollingInterval: RollingInterval.Day)
     .CreateLogger();
 
-    Serilog.Log.Logger.Information($"----------------------------------------- New Run: {DateTime.Now} --------------------------------------------------");
+    Serilog.Log.Logger.Information($"------------------------------- New Run: {DateTime.Now} [{placeName}] ----------------------------------------");
 
     var stopwatch = new Stopwatch();
     stopwatch.Start();
     //Step 1
-    DownloadBook(nyplBookLink, placeName);
+    DownloadBook(nyplBookLink, out int startingImgId, placeName: placeName);
     var lastStepElapsedTIme = stopwatch.Elapsed;
     Serilog.Log.Logger.Information($"Step 1 completed - Book scans downloaded - elapsed time: [{stopwatch.Elapsed}]");
 
@@ -338,9 +352,9 @@ void AllInOne(string nyplBookLink, string placeName)
     Serilog.Log.Logger.Information($"Step 2 completed - Book scans OCRed - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
 
     //Step 3
-    //var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
-    //GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", placeName, "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
-    //Serilog.Log.Logger.Information($"Step 3 completed - Database generated - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
+    var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
+    GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", placeName, "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"), startingImgId);
+    Serilog.Log.Logger.Information($"Step 3 completed - Database generated - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
 
     Console.WriteLine($"Total elapsed time: [{stopwatch.Elapsed}]");
     Serilog.Log.Logger.Information($"Job done ! Total elapsed time: [{stopwatch.Elapsed}]");
