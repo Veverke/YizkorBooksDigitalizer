@@ -12,18 +12,7 @@ using YizkorBooksDigitalizer.Types.SQLiteDAL;
 using System.Diagnostics;
 using Serilog;
 
-
-//Step 1
-//DownloadBook("https://digitalcollections.nypl.org/items/3b71d480-7422-0133-4ba4-00505686d14e", "yedinetz");
-
-//Step 2
-//DigitalizeYizkorBook("novoselitza");
-
-//Step 3
-//var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
-//GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", "novoselitza", "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
-
-AllInOne("https://digitalcollections.nypl.org/items/bb1e0e60-6150-0133-7656-00505686d14e", "briceni");
+AllInOne("https://digitalcollections.nypl.org/items/f2b379d0-6150-0133-e7c9-00505686d14e", "briceva");
 
 #region Selenium Scraping
 void DownloadBook(string uri, string placeName = null, bool headless = false)
@@ -42,8 +31,6 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     Thread.Sleep(TimeSpan.FromMilliseconds(250));
 
     Console.Clear();
-    //$("#results-list a").attr('href')
-
     if (string.IsNullOrEmpty(placeName))
     {
         var placeNameElement = wd.FindElement(By.CssSelector(".item-left h1"));
@@ -60,35 +47,8 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     else
         dir = new DirectoryInfo(placeName);
 
-    //await Task.Delay(TimeSpan.FromMilliseconds(250));
     Thread.Sleep(TimeSpan.FromMilliseconds(250));
-
-    #region deprecated number of pages approach
-    /* this method is not reliable (because the NYPL drop down shows a wrong number of pages in the "load next pages" text - so I download many other images in addition to the full book, I should choose something else */
-
-    //var viewAsBookElement = wd.FindElement(By.CssSelector("#actions .book a"));
-    //if (viewAsBookElement == null) return;
-
-    //var viewAsBookUri = viewAsBookElement.GetAttribute("href");
-    //wd.Navigate().GoToUrl(viewAsBookUri);
-
-    //var jumpToSelectOptions = wd.FindElements(By.CssSelector("#jump-to-select option"));
-    //if (jumpToSelectOptions == null) return;
-
-    //var regex = new Regex(@"\d+[,\.]?\d+\s+pages");
-    //var lastOptionTitle = jumpToSelectOptions.LastOrDefault().GetAttribute("title");
-    //var match = regex.Match(lastOptionTitle);
-    //if (match == null) return;
-
-    //var totalPagesNumStr = match.Value.Replace("pages", string.Empty).Replace(",", string.Empty);
-    //int.TryParse(totalPagesNumStr, out int pagesNum);
-
-    ////https://digitalcollections.nypl.org/items/7086f2d0-7a6d-0133-06d1-00505686a51c
-    ////https://digitalcollections.nypl.org/items/7086f2d0-7a6d-0133-06d1-00505686a51c/book#page/1/mode/1up 
-    #endregion
-
     var regexId = new Regex(@"id=\d+");
-
 
     var morePagesLeft = true;
     int lastImgId = 0;
@@ -120,15 +80,10 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
             if (lastLiElement == null) return;
 
             var outers = lis.Select(e => e.GetAttribute("outerHTML")).ToList();
-
             var lastImgUrl = lis.Where(l => !string.IsNullOrEmpty(l.GetAttribute("title")))?.Last()?.FindElement(By.CssSelector("img"))?.GetAttribute("src");
-
-            //var inners = lis.Select(e => e.GetAttribute("innerHTML")).ToList();
-            //var lastImgUrl = lastLiElement.FindElement(By.CssSelector("img"))?.GetAttribute("src");
-
-
             var match = regexId.Match(lastImgUrl);
             if (match == null) return;
+
             var idOnlyStr = match?.Value.Replace("id=", string.Empty);
 
             int.TryParse(idOnlyStr, out lastImgId);
@@ -139,44 +94,13 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     Console.Clear();
     Console.WriteLine($"Last img id: {lastImgId}");
 
-
-
     //get 1st page, and then extract id and increment by 1 for each subsequent pages
     wd.Navigate().GoToUrl($"{uri}/book#page/1/mode/1up");
-    //await Task.Delay(TimeSpan.FromMilliseconds(250));
     Thread.Sleep(TimeSpan.FromMilliseconds(250));
 
     var imgSrcElement = wd.FindElement(By.CssSelector($"#pagediv1 img"));
     if (imgSrcElement == null) return;
     var imgSrc = imgSrcElement.GetAttribute("src");
-
-    //var queryStringStartingPos = imgSrc.IndexOf('?');
-    //var uriObj = new Uri(imgSrc);
-    //var query = uriObj.Query;
-    //var parsedQs = HttpUtility.ParseQueryString(query);
-    //long.TryParse(parsedQs["id"], out long id);
-
-    //#region extract metadata
-
-
-
-    //var metadataElement = wd.FindElementById("item-content-data");
-    //var nyplId = string.Empty;
-    //if (metadataElement != null)
-    //{
-    //    var links = metadataElement.FindElements(By.TagName("a")).Where(a => a.GetAttribute("href").Contains("http://catalog.nypl.org/record="));
-    //    var link = links.FirstOrDefault();
-    //    if (link != null)
-    //    {
-    //        nyplId = link.Text.Replace("http://catalog.nypl.org/record=", string.Empty);
-    //        wd.Navigate().GoToUrl($"http://catalog.nypl.org/record={nyplId}");
-
-    //        var headers = wd.FindElements(By.CssSelector(".bibInfoLabel"))?.Select(e => e.Text);
-
-    //    }
-    //}
-
-    //#endregion
 
     #region Get Country using Google Places Detail API
 
@@ -202,8 +126,6 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
 
     var imgUrl = imgSrc;
     var webClient = new WebClient();
-
-    //var currentImgId = 0;
     var matchValue = regexId.Match(imgUrl)?.Value;
     var idOnly = matchValue.Replace("id=", string.Empty);
     int.TryParse(idOnly, out int currentImgId);
@@ -214,26 +136,11 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
     var page = 0;
     do
     {
-        //for (int page = 1; page < numOfPages; page++)
-        //{
-
-        //wd.Navigate().GoToUrl($"{uri}/book#page/{page}/mode/1up");
-        //await Task.Delay(TimeSpan.FromMilliseconds(250));
-
-        //var imgSrcElement = wd.FindElement(By.CssSelector($"#pagediv{page} img"));
-        //if (imgSrcElement == null) continue;
-        //var imgSrc = imgSrcElement.GetAttribute("src");
-
         webClient.DownloadFile(imgUrl, $"{dir.FullName}/{placeName} page {++page}.jpg");
-        //Thread.Sleep(TimeSpan.FromSeconds(0.5));
         Thread.Sleep(TimeSpan.FromSeconds(0.15));
-
-        //await Task.Delay(TimeSpan.FromSeconds(1));
         imgUrl = regexId.Replace(imgUrl, $"id={++currentImgId}");
-
         Console.Clear();
         Console.WriteLine($"{nameof(DownloadBook)} - {placeName}: {page}/{totalPages}");
-        //}
     }
     while (currentImgId <= lastImgId);
 
@@ -422,18 +329,18 @@ void AllInOne(string nyplBookLink, string placeName)
     var stopwatch = new Stopwatch();
     stopwatch.Start();
     //Step 1
-    //DownloadBook(nyplBookLink, placeName);
+    DownloadBook(nyplBookLink, placeName);
     var lastStepElapsedTIme = stopwatch.Elapsed;
     Serilog.Log.Logger.Information($"Step 1 completed - Book scans downloaded - elapsed time: [{stopwatch.Elapsed}]");
 
     //Step 2
-    //DigitalizeYizkorBook(placeName);
+    DigitalizeYizkorBook(placeName);
     Serilog.Log.Logger.Information($"Step 2 completed - Book scans OCRed - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
 
     //Step 3
-    var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
-    GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", placeName, "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
-    Serilog.Log.Logger.Information($"Step 3 completed - Database generated - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
+    //var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
+    //GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", placeName, "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
+    //Serilog.Log.Logger.Information($"Step 3 completed - Database generated - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
 
     Console.WriteLine($"Total elapsed time: [{stopwatch.Elapsed}]");
     Serilog.Log.Logger.Information($"Job done ! Total elapsed time: [{stopwatch.Elapsed}]");
