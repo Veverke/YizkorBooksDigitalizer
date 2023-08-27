@@ -12,7 +12,6 @@
 *Books/*/*/*.jpg
 *Books/*/*/*.txt
 *Books/*/*/*.json
-*Books/*/*/*.db
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

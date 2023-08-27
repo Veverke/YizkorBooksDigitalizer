@@ -10,9 +10,8 @@ using System.Text;
 using Google.Cloud.Vision.V1;
 using YizkorBooksDigitalizer.Types.SQLiteDAL;
 using System.Diagnostics;
-using OpenQA.Selenium.DevTools;
 using Serilog;
-using Google.Protobuf.WellKnownTypes;
+
 
 //Step 1
 //DownloadBook("https://digitalcollections.nypl.org/items/3b71d480-7422-0133-4ba4-00505686d14e", "yedinetz");
