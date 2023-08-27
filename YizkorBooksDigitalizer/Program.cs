@@ -10,6 +10,9 @@ using System.Text;
 using Google.Cloud.Vision.V1;
 using YizkorBooksDigitalizer.Types.SQLiteDAL;
 using System.Diagnostics;
+using OpenQA.Selenium.DevTools;
+using Serilog;
+using Google.Protobuf.WellKnownTypes;
 
 //Step 1
 //DownloadBook("https://digitalcollections.nypl.org/items/3b71d480-7422-0133-4ba4-00505686d14e", "yedinetz");
@@ -21,7 +24,7 @@ using System.Diagnostics;
 //var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
 //GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", "novoselitza", "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
 
-AllInOne("yedinetz");
+AllInOne("https://digitalcollections.nypl.org/items/bb1e0e60-6150-0133-7656-00505686d14e", "briceni");
 
 #region Selenium Scraping
 void DownloadBook(string uri, string placeName = null, bool headless = false)
@@ -108,7 +111,7 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
             numOfClicksOnNext++;
 
             Console.Clear();
-            Console.WriteLine($"next click: {numOfClicksOnNext}");
+            Console.WriteLine($"{nameof(DownloadBook)}: {placeName} - next click: {numOfClicksOnNext}");
             Thread.Sleep(TimeSpan.FromMilliseconds(100));
         }
         else
@@ -230,7 +233,7 @@ void DownloadBook(string uri, string placeName = null, bool headless = false)
         imgUrl = regexId.Replace(imgUrl, $"id={++currentImgId}");
 
         Console.Clear();
-        Console.WriteLine($"{placeName}: {page}/{totalPages}");
+        Console.WriteLine($"{nameof(DownloadBook)} - {placeName}: {page}/{totalPages}");
         //}
     }
     while (currentImgId <= lastImgId);
@@ -332,7 +335,13 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
             File.WriteAllLines(errorsOutputPath, errors, Encoding.UTF8);
         }
         Console.Clear();
-        Console.WriteLine($"{i + 1}/{images.Length}");
+        Console.WriteLine($"{nameof(DigitalizeYizkorBook)}: {i + 1}/{images.Length}");
+    }
+
+    var outputFilePlaceName = Path.GetDirectoryName(yizkorBookImagesFolder);
+    if (string.IsNullOrEmpty(outputFilePlaceName))
+    {
+        outputFilePlaceName = yizkorBookImagesFolder;
     }
 
     File.WriteAllLines($"fullBook {Path.GetDirectoryName(yizkorBookImagesFolder)} {timestamp}.txt", bookTexts, Encoding.UTF8);
@@ -356,7 +365,7 @@ void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile)
     var sqlScript = File.ReadAllText(dbSchemaTemplateSqlFile);
     var affectedRows = sqliteDAL.ExecuteNonQuery(sqlScript);
     //turn off journal creation at every non query command
-    sqliteDAL.ExecuteNonQuery($"PRAGMA schema.journal_mode=OFF;");
+    sqliteDAL.ExecuteNonQuery($"PRAGMA journal_mode=OFF;");
 
     var bookId = 1;
     int pageId = 0, lineId = 0, wordId = 0;
@@ -364,15 +373,21 @@ void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile)
     for (var pageIndex = 0; pageIndex < pageFiles.Count(); pageIndex++)
     {
         var pageFile = pageFiles.ElementAt(pageIndex);
-        var pageLines = File.ReadAllLines(pageFile, Encoding.UTF8);
+        var pageLines = File.ReadAllLines(pageFile, Encoding.UTF8).Where(l => !l.All(c => char.IsDigit(c))); //leave behind pagination number lines (should be either the last ones (hopefully) or first ones (like hotin case, weird)
 
         var succeeded = sqliteDAL.Insert($"INSERT INTO Page (Id, BookId, Number) VALUES ({++pageId}, {bookId}, {pageIndex + 1})");
         Console.Clear();
-        Console.WriteLine($"page {pageIndex + 1}/{pageFiles.Count()}");
+        Console.WriteLine($"{nameof(GenerateDatabase)}: place: {bookName} page {pageIndex + 1}/{pageFiles.Count()}");
 
-        for (var lineIndex = 0; lineIndex < pageLines.Length; lineIndex++)
+        for (var lineIndex = 0; lineIndex < pageLines.Count(); lineIndex++)
         {
-            var pageLine = pageLines[lineIndex];
+            var pageLine = pageLines.ElementAt(lineIndex);
+            //if line is pagination number, skip
+            if (pageLine.All(c => !char.IsLetter(c)))
+            {
+                continue;
+            }
+
             var words = pageLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
             succeeded = sqliteDAL.Insert($"INSERT INTO Line (Id, PageId, Number) VALUES ({++lineId}, {pageId}, {lineIndex + 1})");
@@ -396,19 +411,31 @@ void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile)
 }
 #endregion Database Creator
 
-void AllInOne(string placeName)
+void AllInOne(string nyplBookLink, string placeName)
 {
+    Serilog.Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}", path: "Logs/yizkor-book-digitalizer.log", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+    Serilog.Log.Logger.Information($"----------------------------------------- New Run: {DateTime.Now} --------------------------------------------------");
+
     var stopwatch = new Stopwatch();
     stopwatch.Start();
     //Step 1
-    DownloadBook("https://digitalcollections.nypl.org/items/3b71d480-7422-0133-4ba4-00505686d14e", placeName);
+    //DownloadBook(nyplBookLink, placeName);
+    var lastStepElapsedTIme = stopwatch.Elapsed;
+    Serilog.Log.Logger.Information($"Step 1 completed - Book scans downloaded - elapsed time: [{stopwatch.Elapsed}]");
 
     //Step 2
-    DigitalizeYizkorBook(placeName);
+    //DigitalizeYizkorBook(placeName);
+    Serilog.Log.Logger.Information($"Step 2 completed - Book scans OCRed - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
 
     //Step 3
     var gitRootFolder = Directory.GetParent(Directory.GetParent(Directory.GetParent(Environment.CurrentDirectory).FullName).FullName).FullName;
     GenerateDatabase(Path.Combine(Directory.GetParent(gitRootFolder).FullName, "Books", placeName, "Images OCRed"), Path.Combine(gitRootFolder, "YizkorBook-schema-template.sql"));
+    Serilog.Log.Logger.Information($"Step 3 completed - Database generated - elapsed time: [{stopwatch.Elapsed - lastStepElapsedTIme}]");
 
     Console.WriteLine($"Total elapsed time: [{stopwatch.Elapsed}]");
+    Serilog.Log.Logger.Information($"Job done ! Total elapsed time: [{stopwatch.Elapsed}]");
 }
