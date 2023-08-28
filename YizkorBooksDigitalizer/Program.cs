@@ -11,8 +11,9 @@ using Google.Cloud.Vision.V1;
 using YizkorBooksDigitalizer.Types.SQLiteDAL;
 using System.Diagnostics;
 using Serilog;
+using System.Globalization;
 
-AllInOne("https://digitalcollections.nypl.org/items/c1d5aed0-2328-0133-6337-58d385a7b928", "zychlin");
+AllInOne("https://digitalcollections.nypl.org/items/6e01ff60-2e35-0133-5b16-58d385a7bbd0", "wyszogrod");
 
 #region Selenium Scraping
 void DownloadBook(string uri, out int startingImgId, string placeName = null, bool headless = false)
@@ -137,6 +138,7 @@ void DownloadBook(string uri, out int startingImgId, string placeName = null, bo
     int.TryParse(idOnly, out int currentImgId);
 
     File.WriteAllText($"Starting-Image-Id-{placeName}-{(currentImgId - 1)}.txt", (currentImgId - 1).ToString());
+    startingImgId = currentImgId - 1;
 
     var totalPages = lastImgId - currentImgId + 1;
     var page = 0;
@@ -155,8 +157,6 @@ void DownloadBook(string uri, out int startingImgId, string placeName = null, bo
     //write metadata json
     File.WriteAllText($"{imagesFolder.FullName}/{placeName} metadata.json", JsonConvert.SerializeObject(new { country, language }, Newtonsoft.Json.Formatting.Indented));
     //Directory.Move(dir.FullName, $@"C:\Users\avraham.kahana\Downloads\books\{placeName}");
-
-    startingImgId = currentImgId - 1;
 }
 
 void DownloadBooks()
@@ -268,14 +268,14 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
 #region Database Creator
 void GenerateDatabase(string ocredImagesFolder, string dbSchemaTemplateSqlFile, int startingImgId)
 {
-    var outputFolder = Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", ocredImagesFolder);
+    var outputFolder = Path.Combine(@"C:\\Users\\avrei\\source\\repos\\YizkorBooksDigitalizer\\Books", Directory.GetParent(ocredImagesFolder).Name);
     var bookName = Directory.GetParent(ocredImagesFolder)?.Name;
 
     if (string.IsNullOrEmpty(bookName))
     {
         bookName = ocredImagesFolder;
     }
-    var dbFileName = Path.Combine(outputFolder, $"{bookName}-{startingImgId}.db");
+    var dbFileName = Path.Combine(outputFolder, $"{CultureInfo.CurrentCulture.TextInfo.ToTitleCase(bookName)}-{startingImgId}.db");
     if (File.Exists(dbFileName))
     {
         File.Delete(dbFileName);
