@@ -12,8 +12,10 @@ using YizkorBooksDigitalizer.Types.SQLiteDAL;
 using System.Diagnostics;
 using Serilog;
 using System.Globalization;
+using System.Net.Http;
 
 AllInOne("https://digitalcollections.nypl.org/items/6e01ff60-2e35-0133-5b16-58d385a7bbd0", "wyszogrod");
+//DownloadBook("https://digitalcollections.nypl.org/items/f68a32d0-a05c-0134-7bba-00505686a51c", out int startingImgId, "bessarabia-3");
 
 #region Selenium Scraping
 void DownloadBook(string uri, out int startingImgId, string placeName = null, bool headless = false)
@@ -108,51 +110,87 @@ void DownloadBook(string uri, out int startingImgId, string placeName = null, bo
     if (imgSrcElement == null) return;
     var imgSrc = imgSrcElement.GetAttribute("src");
 
+    wd.Quit();
+
     #region Get Country using Google Places Detail API
 
     var country = string.Empty;
     var language = string.Empty;
-    using (var httpClient = new HttpClient())
-    {
-        var res = httpClient.GetStringAsync($"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input={placeName}&inputtype=textquery&key=AIzaSyBAmz3I0KOOxz5hvr2WdARyT0S-IGeSQ-w").Result;
-        //var googlePlacesObj = JsonConvert.DeserializeObject<GooglePlaces>(res);
-        //var placeId = googlePlacesObj?.Candidates?.FirstOrDefault()?.place_id ?? string.Empty;
+    //using (var httpClient = new HttpClient())
+    //{
+    //    var res = httpClient.GetStringAsync($"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input={placeName}&inputtype=textquery&key=AIzaSyBAmz3I0KOOxz5hvr2WdARyT0S-IGeSQ-w").Result;
+    //    var googlePlacesObj = JsonConvert.DeserializeObject<GooglePlaces>(res);
+    //    var placeId = googlePlacesObj?.Candidates?.FirstOrDefault()?.place_id ?? string.Empty;
 
-        //https://www.newtonsoft.com/json/help/html/SelectToken.htm
-        var placeId = (string)JObject.Parse(res)?.SelectToken("candidates[0].place_id");
+    //https://www.newtonsoft.com/json/help/html/SelectToken.htm
+    //    var placeId = (string)JObject.Parse(res)?.SelectToken("candidates[0].place_id");
 
-        var detailCallRes = httpClient.GetStringAsync($"https://maps.googleapis.com/maps/api/place/details/json?key=AIzaSyBAmz3I0KOOxz5hvr2WdARyT0S-IGeSQ-w&place_id={placeId}").Result;
-        country = (string)JObject.Parse(detailCallRes)?.SelectToken("result.address_components[3].long_name");
+    //    var detailCallRes = httpClient.GetStringAsync($"https://maps.googleapis.com/maps/api/place/details/json?key=AIzaSyBAmz3I0KOOxz5hvr2WdARyT0S-IGeSQ-w&place_id={placeId}").Result;
+    //    country = (string)JObject.Parse(detailCallRes)?.SelectToken("result.address_components[3].long_name");
 
-        //WORKING !
-    }
+    //    WORKING!
+    //}
     #endregion
 
-    wd.Quit();
-
     var imgUrl = imgSrc;
-    var webClient = new WebClient();
-    webClient.Proxy = null;
     var matchValue = regexId.Match(imgUrl)?.Value;
     var idOnly = matchValue.Replace("id=", string.Empty);
     int.TryParse(idOnly, out int currentImgId);
 
-    File.WriteAllText($"Starting-Image-Id-{placeName}-{(currentImgId - 1)}.txt", (currentImgId - 1).ToString());
+    var indexesList = new List<int>();
+    var imgDownloadLoopIterarions = lastImgId - currentImgId + 1;
+    for (var i = 0; i < imgDownloadLoopIterarions; i++)
+    {
+        indexesList.Add(i);
+    }
+
+    var myHttpClient = new HttpClient();
+    var startTime = DateTime.Now;
+    var downloadCounter = 0;
+    Console.WriteLine($"Total items to download: [{indexesList.Count}]");
+    var outputFolderPath = Path.Combine(imagesFolder.FullName);
+    if (!Directory.Exists(outputFolderPath))
+    {
+        Directory.CreateDirectory(outputFolderPath);
+    }
+    var parallelResult = Parallel.ForEachAsync(indexesList, async (idx, ct) =>
+    {
+        var destinationFilePath = Path.Combine(outputFolderPath, $"{placeName} page {idx + 1}.jpg");
+        Interlocked.Increment(ref downloadCounter);
+        
+        imgUrl = regexId.Replace(imgUrl, $"id={currentImgId + idx}");
+        var stream = await myHttpClient.GetStreamAsync(imgUrl);
+
+        if (File.Exists(destinationFilePath))
+        {
+            return;
+        }
+        var fileStream = new FileStream(destinationFilePath, FileMode.Create);
+        await stream.CopyToAsync(fileStream);
+        Console.Clear();
+        Console.WriteLine($"{nameof(DownloadBook)} - {placeName}: {downloadCounter}/{imgDownloadLoopIterarions}");
+    });
+    parallelResult.Wait();
+    Console.WriteLine($"Parallel is completed: {parallelResult.IsCompleted} Elapsed time: [{DateTime.Now - startTime}]");
+
+    File.WriteAllText(Path.Combine(outputFolderPath, $"Starting-Image-Id-{placeName}-{(currentImgId - 1)}.txt"), (currentImgId - 1).ToString());
     startingImgId = currentImgId - 1;
 
-    var totalPages = lastImgId - currentImgId + 1;
-    var page = 0;
-    do
-    {
-        webClient.DownloadFile(imgUrl, Path.Combine(imagesFolder.FullName, $"{placeName} page {++page}.jpg"));
-        Thread.Sleep(TimeSpan.FromSeconds(0.05));
-        imgUrl = regexId.Replace(imgUrl, $"id={++currentImgId}");
-        Console.Clear();
-        Console.WriteLine($"{nameof(DownloadBook)} - {placeName}: {page}/{totalPages}");
-    }
-    while (currentImgId <= lastImgId);
+    #region Deprecated use of WebClient for scan downloads - using Parallel.Foreach instead, completes job in 1 min instead of 15. Watch out for missed/undonwloaded images. Saw download loop iterations was sometimes lower than the total pages required to download.
+    //var totalPages = lastImgId - currentImgId + 1;
+    //var page = 0;
+    //do
+    //{
+    //    webClient.DownloadFile(imgUrl, Path.Combine(imagesFolder.FullName, $"{placeName} page {++page}.jpg"));
+    //    Thread.Sleep(TimeSpan.FromSeconds(0.05));
+    //    imgUrl = regexId.Replace(imgUrl, $"id={++currentImgId}");
+    //    Console.Clear();
+    //    Console.WriteLine($"{nameof(DownloadBook)} - {placeName}: {page}/{totalPages}");
+    //}
+    //while (currentImgId <= lastImgId);
 
-    webClient.Dispose();
+    //webClient.Dispose();
+    #endregion Deprecated use of WebClient for scan downloads - using Parallel.Foreach instead, completes job in 1 min instead of 15. Watch out for missed/undonwloaded images. Saw download loop iterations was sometimes lower than the total pages required to download.
 
     //write metadata json
     File.WriteAllText($"{imagesFolder.FullName}/{placeName} metadata.json", JsonConvert.SerializeObject(new { country, language }, Newtonsoft.Json.Formatting.Indented));
