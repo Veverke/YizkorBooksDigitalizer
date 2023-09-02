@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Interactions;
 using OpenQA.Selenium;
-using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using System.Text;
 using Google.Cloud.Vision.V1;
@@ -12,10 +11,9 @@ using YizkorBooksDigitalizer.Types.SQLiteDAL;
 using System.Diagnostics;
 using Serilog;
 using System.Globalization;
-using System.Net.Http;
 
-AllInOne("https://digitalcollections.nypl.org/items/6e01ff60-2e35-0133-5b16-58d385a7bbd0", "wyszogrod");
-//DownloadBook("https://digitalcollections.nypl.org/items/f68a32d0-a05c-0134-7bba-00505686a51c", out int startingImgId, "bessarabia-3");
+AllInOne("https://digitalcollections.nypl.org/items/6e01ff60-2e35-0133-5b16-58d385a7bbd0", "zyradow-amshinov-wiskitki");
+//DownloadBook("https://digitalcollections.nypl.org/items/54ccda90-5019-0133-0fc4-00505686a51c", out int startingImgId, "bessarabia-1971");
 
 #region Selenium Scraping
 void DownloadBook(string uri, out int startingImgId, string placeName = null, bool headless = false)
@@ -256,10 +254,18 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
         outputDir = Directory.CreateDirectory($"Output {yizkorBookImagesFolder} {timestamp}");
 
     var client = ImageAnnotatorClient.Create();
+    var errorsOutputPath = Path.Combine(imagesOCRedFolder, "errors.txt");
+
 
     for (var i = 0; i < images.Count(); i++)
     {
         var image = images[i];
+        var pageOutputPath = Path.Combine(imagesOCRedFolder, $"{Path.GetFileNameWithoutExtension(image)}.txt");
+
+        if (File.Exists(pageOutputPath))
+        {
+            continue;
+        }
 
         var googleImage = Google.Cloud.Vision.V1.Image.FromFile(image);
         //var client = ImageAnnotatorClient.Create();
@@ -279,9 +285,6 @@ void DigitalizeYizkorBook(string yizkorBookImagesFolder)
 
         var pageText = response?.Text ?? string.Empty;
         bookTexts.Add(string.Join(string.Empty, pageText));
-        var pageOutputPath = Path.Combine(imagesOCRedFolder, $"{Path.GetFileNameWithoutExtension(image)}.txt");
-        var errorsOutputPath = Path.Combine(imagesOCRedFolder, "errors.txt");
-
 
         List<string> pageTextFinal = new List<string> { $"Page {i + 1}", pageText };
         File.WriteAllText(pageOutputPath, pageText, Encoding.UTF8);
@@ -382,6 +385,7 @@ void AllInOne(string nyplBookLink, string placeName)
     stopwatch.Start();
     //Step 1
     DownloadBook(nyplBookLink, out int startingImgId, placeName: placeName);
+    //int startingImgId = 56744864;
     var lastStepElapsedTIme = stopwatch.Elapsed;
     Serilog.Log.Logger.Information($"Step 1 completed - Book scans downloaded - elapsed time: [{stopwatch.Elapsed}]");
 
